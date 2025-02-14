@@ -47,6 +47,8 @@ int main(int argc, char *argv[])
     char *address;
     struct hostent *dpu;
     host_info_t host_info;
+    size_t bytes_sent = 0;
+    void *buf;
 
     shmem_init();
     me       = shmem_my_pe();
@@ -70,7 +72,8 @@ int main(int argc, char *argv[])
     
     memset(&server_address, 0, sizeof(server_address));
     server_address.sin_family = AF_INET;
-    server_address.sin_addr.s_addr = inet_addr(dpu->h_addr);
+    bcopy((char *)dpu->h_addr, (char *) &server_address.sin_addr.s_addr, dpu->h_length);
+    //server_address.sin_addr.s_addr = inet_addr(dpu->h_addr);
     server_address.sin_port = htons(PORT);
 
     if (connect(sockfd, (struct sockaddr *) &server_address, sizeof(server_address)) < 0) {
@@ -79,12 +82,11 @@ int main(int argc, char *argv[])
     }
     /* end connect to server */
 
+    //s_buf_heap = malloc(1024);
+    //r_buf_heap = malloc(1024);
     s_buf_heap = shmem_malloc(1024);
     r_buf_heap = shmem_malloc(1024);
 
-    global_source = malloc(numprocs * sizeof(ucc_mem_map_mem_h));
-    global_dest   = malloc(numprocs * sizeof(ucc_mem_map_mem_h));
-    
     ret = setup_ucc(me, numprocs, &ucc_lib, &ucc_context, &ucc_team);
     if (ret != 0) {
         printf("failure in ucc setup\n");
@@ -104,7 +106,7 @@ int main(int argc, char *argv[])
     if (status != UCC_OK) {
         abort();
     }
-
+#if 0
     /* map recv buf */
     map_params.segments = &map[1];
     status = ucc_mem_map(ucc_context, UCC_MEM_MAP_EXPORT, &map_params, &call_size, &local[1]);
@@ -112,20 +114,24 @@ int main(int argc, char *argv[])
         abort();
     }
     exchange_size += call_size;
+#endif
     host_info.host_sbuf_va = (uint64_t)map[0].address;
     host_info.host_sbuf_len = map[0].len;
-    host_info.host_rbuf_va = (uint64_t)map[1].address;
-    host_info.host_rbuf_len = map[1].len;
-
+/*    host_info.host_rbuf_va = (uint64_t)map[1].address;
+    host_info.host_rbuf_len = map[1].len;*/
+    host_info.exchange_size = exchange_size;
     
     packed  = malloc(exchange_size);
-    memcpy(packed, local[0], exchange_size - call_size);
-    memcpy(packed + (exchange_size - call_size), local[1], call_size);
+    memcpy(packed, local[0], exchange_size);
+//    memcpy(packed, local[0], exchange_size - call_size);
+//    memcpy(packed + (exchange_size - call_size), local[1], call_size);
     shmem_barrier_all();
 
+    buf = malloc(sizeof(host_info_t));
+    memcpy(buf, &host_info, sizeof(host_info_t));
     /* send packed buffers to dpu */
-    send(sockfd, &host_info, sizeof(host_info_t), 0);
-    send(sockfd, packed, exchange_size, 0);
+    bytes_sent = send(sockfd, buf, sizeof(host_info_t), 0);
+    bytes_sent = send(sockfd, packed, exchange_size, 0);
 
     shmem_barrier_all();
     /* recv alltoall status */
@@ -135,8 +141,8 @@ int main(int argc, char *argv[])
     }
 
     /* unmap local memhs */
-    ucc_mem_unmap(&local[0]);
-    ucc_mem_unmap(&local[1]);
+    //ucc_mem_unmap(&local[0]);
+    //ucc_mem_unmap(&local[1]);
 
     shmem_finalize();
     return 0;

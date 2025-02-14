@@ -1,17 +1,16 @@
 CC=shmemcc
-CFLAGS=-O3 -g
+CFLAGS=-O0 -g
 LDFLAGS=-lucp -lucs -lucc
 
 .PHONY: all clean
 
-all: common.o host dpu
+all: host dpu
 
-common.o: common.c common.h
+host: host.c common.c
+	${CC} ${CFLAGS} host.c common.c -o $@ ${LDFLAGS}
 
-host: host.c common.o
-	${CC} ${CFLAGS} host.c common.o -o $@ ${LDFLAGS}
-
-dpu: dpu.c common.o
+dpu: dpu.c common.c
+	${CC} -I${HOME}/build-memmap/install.arm/include ${CFLAGS} dpu.c common.c -o dpu -L${HOME}/build-memmap/install.arm/lib ${LDFLAGS}
 
 clean:
-	rm host dpu common.o
+	rm host dpu

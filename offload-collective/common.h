@@ -13,7 +13,7 @@ typedef struct host_info {
     uint64_t host_sbuf_len;
     uint64_t host_rbuf_len;
     uint64_t exchange_size;
-} host_info_t;
+}__attribute__((packed)) host_info_t;
 
 extern void *a2a_psync;
 

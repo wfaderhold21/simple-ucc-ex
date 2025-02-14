@@ -113,7 +113,7 @@ char * get_server_name(void) {
     char *dpu_ip = NULL;
     char file_host_ip[64];
     char file_dpu_ip[64];
-    char *ip;
+    char *ip = malloc(64);
     int ret;
     FILE *fp;
 
@@ -122,8 +122,6 @@ char * get_server_name(void) {
         fprintf(stderr, "could not get hostname");
         goto out;
     }
-
-    printf("hostname: %s\n", ip);
 
     // open test.dat (format: hostname dpu_hostname)
     fp = fopen("test.dat", "r");
