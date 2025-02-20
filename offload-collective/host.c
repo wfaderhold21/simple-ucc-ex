@@ -137,12 +137,13 @@ int main(int argc, char *argv[])
     /* recv alltoall status */
     read(sockfd, &ret, sizeof(int));
     if (ret != 0) {
-        fprintf(stderr, "a2a on dpu failed");
+        fprintf(stderr, "a2a on dpu failed\n");
+    } else {
+        fprintf(stderr, "a2a successful\n");
     }
 
     /* unmap local memhs */
-    //ucc_mem_unmap(&local[0]);
-    //ucc_mem_unmap(&local[1]);
+    ucc_mem_unmap(&local[0]);
 
     shmem_finalize();
     return 0;

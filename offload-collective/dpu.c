@@ -114,7 +114,7 @@ int main(void)
     handle_size = exchange_size / 2; /* just an assumption */
 
     if (rank == 0)
-        printf("performing import...");
+        printf("performing import...\n");
     /* import and map */
     map_params.n_segments = 1;
     // import
@@ -277,9 +277,9 @@ int main(void)
 
     /* unmap global memh first */
     for (int i = 0; i < size; i++) {
-    //    ucc_mem_unmap(&global_source[i]);
-//        ucc_mem_unmap(&global_dest[i]);
+        ucc_mem_unmap(&global_source[i]);
     }
+    ucc_mem_unmap(&import_source[0]);
     close(new_socket);
     MPI_Finalize();
     return 0;
