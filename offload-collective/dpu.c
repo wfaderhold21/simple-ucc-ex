@@ -182,7 +182,7 @@ int main(void)
         },
         .flags = UCC_COLL_ARGS_FLAG_MEM_MAPPED_BUFFERS,
         .global_work_buffer = a2a_psync, /* mapped via context */
-        .src_memh.local_memh = import_source, 
+        .src_memh.local_memh = import_source[0], 
         .dst_memh.global_memh = global_source,
     };
     status = ucc_collective_init(&a2a_coll, &req, ucc_team);
