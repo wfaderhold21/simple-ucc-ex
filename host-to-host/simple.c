@@ -242,13 +242,17 @@ int main(int argc, char *argv[])
         abort();
     }
     status = ucc_collective_test(req);
-    while (status != UCC_OK) {
+    while (status == UCC_INPROGRESS) {
         ucc_context_progress(ucc_context);
         status = ucc_collective_test(req);
     }
-    ucc_collective_finalize(req);
-    if (me == 0) {
-        printf("completed alltoall\n");
+    if (status != UCC_OK) {
+        printf("alltoall failed\n");
+    } else {
+        ucc_collective_finalize(req);
+        if (me == 0) {
+            printf("completed alltoall\n");
+        }
     }
 }
     shmem_barrier_all();
