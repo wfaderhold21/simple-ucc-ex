@@ -11,6 +11,8 @@
 #include <ucp/api/ucp.h>
 #include <assert.h>
 
+#define BUFFER_SIZE     1024
+
 void *a2a_psync;
 
 static ucc_status_t oob_allgather(void *sbuf, void *rbuf, size_t msglen,
@@ -131,7 +133,6 @@ int main(int argc, char *argv[])
     ucc_mem_map_params_t map_params;
     ucc_mem_map_t        map[2];
     ucc_mem_map_mem_h    local[2];
-    ucc_mem_map_mem_h   *global_source;
     ucc_mem_map_mem_h   *global_dest;
     int                  ret;
     ucc_status_t         status;
@@ -139,15 +140,12 @@ int main(int argc, char *argv[])
     void                *packed;
     void                *rpacked;
 
-    shmem_init();
-    me       = shmem_my_pe();
-    numprocs = shmem_n_pes();
+    MPI_Init(&argc, &argv);
+    MPI_Comm_rank(MPI_COMM_WORLD, &me);
+    MPI_Comm_size(MPI_COMM_WORLD, &numprocs);
 
-    shmem_barrier_all();
-    s_buf_heap = malloc(1024); //shmem_malloc(1024);
-    r_buf_heap = malloc(1024); //shmem_malloc(1024);
-
-    global_source = malloc(numprocs * sizeof(ucc_mem_map_mem_h));
+    s_buf_heap    = malloc(BUFFER_SIZE);
+    r_buf_heap    = malloc(BUFFER_SIZE);
     global_dest   = malloc(numprocs * sizeof(ucc_mem_map_mem_h));
     
     ret = setup_ucc(me, numprocs, &ucc_lib, &ucc_context, &ucc_team);
@@ -158,79 +156,69 @@ int main(int argc, char *argv[])
 
     /* setup maps for export */
     map[0].address = s_buf_heap;
+    map[0].len     = BUFFER_SIZE;
     map[1].address = r_buf_heap;
-    map[0].len = 1024;
-    map[1].len = 1024;
+    map[1].len     = BUFFER_SIZE;
 
     /* currently limited to 1 segment per map_param for export */
     map_params.n_segments = 1;
     map_params.segments   = &map[0];
-    status = ucc_mem_map(ucc_context, UCC_MEM_MAP_EXPORT, &map_params, &exchange_size, &local[0]);
+    /* map source buffer for offset calculation during onesided collective */
+    status = ucc_mem_map(ucc_context, UCC_MEM_MAP_MODE_EXPORT, &map_params, &exchange_size, &local[0]);
     if (status != UCC_OK) {
+        fprintf(stderr, "failed to export source buffer with status %d\n", status);
         abort();
     }
 
     /* map recv buf */
     map_params.segments = &map[1];
-    status = ucc_mem_map(ucc_context, UCC_MEM_MAP_EXPORT, &map_params, &call_size, &local[1]);
+    status = ucc_mem_map(ucc_context, UCC_MEM_MAP_MODE_EXPORT, &map_params, &exchange_size, &local[1]);
     if (status != UCC_OK) {
+        fprintf(stderr, "failed to export dest buffer with status %d\n", status);
         abort();
     }
-    exchange_size += call_size;
-    packed  = malloc(exchange_size);
-    rpacked = malloc(exchange_size * numprocs);
-    memcpy(packed, local[0], exchange_size - call_size);
-    memcpy(packed + (exchange_size - call_size), local[1], call_size);
-    shmem_barrier_all();
+    packed         = malloc(exchange_size);
+    rpacked        = malloc(exchange_size * numprocs);
+    memcpy(packed, local[1], exchange_size);
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // exchange here
     MPI_Request request;
     MPI_Allgather(packed, exchange_size, MPI_BYTE, rpacked, exchange_size, MPI_BYTE, MPI_COMM_WORLD);
 
     // import
+    map_params.segments = &map[1];
     for (int i = 0; i < numprocs; i++) {
-        for (int j = 0; j < 2; j++) {
-            size_t dummy; /* we do not need a pack size on import */
-            map_params.segments = &map[j];
-            if (j == 0) {
-                global_source[i] = rpacked + (exchange_size * i);
-                status = ucc_mem_map(ucc_context, UCC_MEM_MAP_IMPORT, &map_params, &dummy, &global_source[i]);
-                if (status != UCC_OK) {
-                    abort();
-                }
-            } else {
-                global_dest[i] = rpacked + (exchange_size * i) + call_size;
-                status = ucc_mem_map(ucc_context, UCC_MEM_MAP_IMPORT, &map_params, &dummy, &global_dest[i]);
-                if (status != UCC_OK) {
-                    abort();
-                }
-            }
+        size_t dummy; /* we do not need a pack size on import */
+        global_dest[i] = rpacked + (exchange_size * i);
+        status = ucc_mem_map(ucc_context, UCC_MEM_MAP_MODE_IMPORT, &map_params, &dummy, &global_dest[i]);
+        if (status != UCC_OK) {
+            abort();
         }
     }
-    shmem_barrier_all();
+    MPI_Barrier(MPI_COMM_WORLD);
     // perform alltoall
-{
     if (me == 0) {
-    printf("performing alltoall\n");
+        printf("performing alltoall\n");
     }
     ucc_coll_args_t a2a_coll = {
         .mask = UCC_COLL_ARGS_FIELD_FLAGS | UCC_COLL_ARGS_FIELD_GLOBAL_WORK_BUFFER | UCC_COLL_ARGS_FIELD_MEM_MAP_SRC_MEMH | UCC_COLL_ARGS_FIELD_MEM_MAP_DST_MEMH,
         .coll_type = UCC_COLL_TYPE_ALLTOALL,
         .src.info = {
-            .buffer = s_buf_heap,
-            .count = 2 * numprocs,
+            .buffer   = s_buf_heap,
+            .count    = 2 * numprocs,
             .datatype = UCC_DT_INT64,
             .mem_type = UCC_MEMORY_TYPE_UNKNOWN,
         },
         .dst.info = {
-            .buffer = r_buf_heap,
-            .count = 2 * numprocs,
+            .buffer   = r_buf_heap,
+            .count    = 2 * numprocs,
             .datatype = UCC_DT_INT64,
             .mem_type = UCC_MEMORY_TYPE_UNKNOWN,
         },
-        .flags = UCC_COLL_ARGS_FLAG_MEM_MAPPED_BUFFERS,
-        .global_work_buffer = a2a_psync, /* mapped via context */
-        .src_memh.local_memh = global_source[me],
+        .flags = UCC_COLL_ARGS_FLAG_MEM_MAPPED_BUFFERS | UCC_COLL_ARGS_FLAG_DST_MEMH_GLOBAL,
+        .global_work_buffer   = a2a_psync, /* mapped via context */
+        .src_memh.local_memh  = local[0],
         .dst_memh.global_memh = global_dest,
     };
     status = ucc_collective_init(&a2a_coll, &req, ucc_team);
@@ -254,18 +242,21 @@ int main(int argc, char *argv[])
             printf("completed alltoall\n");
         }
     }
-}
-    shmem_barrier_all();
+    MPI_Barrier(MPI_COMM_WORLD);
 
     /* unmap global memh first */
     for (int i = 0; i < numprocs; i++) {
-        ucc_mem_unmap(&global_source[i]);
         ucc_mem_unmap(&global_dest[i]);
     }
     /* unmap local memhs */
     ucc_mem_unmap(&local[0]);
     ucc_mem_unmap(&local[1]);
 
-    shmem_finalize();
+    free(packed);
+    free(rpacked);
+    free(global_dest);
+    free(s_buf_heap);
+    free(r_buf_heap);
+    MPI_Finalize();
     return 0;
 }
